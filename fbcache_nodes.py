@@ -105,6 +105,7 @@ class ApplyFBCacheOnModel:
         else:
             start_sigma = end_sigma = None
 
+        @torch.compiler.disable()
         def validate_use_cache(use_cached):
             nonlocal consecutive_cache_hits
             use_cached = use_cached and (start_sigma is None or current_timestep <= start_sigma)
