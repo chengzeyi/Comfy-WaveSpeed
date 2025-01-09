@@ -122,6 +122,7 @@ class CachedTransformerBlocks(torch.nn.Module):
         single_transformer_blocks=None,
         *,
         residual_diff_threshold,
+        validate_can_use_cache_function,
         return_hidden_states_first=True,
         accept_hidden_states_first=True,
         cat_hidden_states_first=False,
@@ -132,6 +133,7 @@ class CachedTransformerBlocks(torch.nn.Module):
         self.transformer_blocks = transformer_blocks
         self.single_transformer_blocks = single_transformer_blocks
         self.residual_diff_threshold = residual_diff_threshold
+        self.validate_can_use_cache_function=validate_can_use_cache_function
         self.return_hidden_states_first = return_hidden_states_first
         self.accept_hidden_states_first = accept_hidden_states_first
         self.cat_hidden_states_first = cat_hidden_states_first
@@ -209,9 +211,11 @@ class CachedTransformerBlocks(torch.nn.Module):
         first_hidden_states_residual = hidden_states - original_hidden_states
         del original_hidden_states
 
-        can_use_cache = get_can_use_cache(
-            first_hidden_states_residual,
-            threshold=self.residual_diff_threshold,
+        can_use_cache = self.validate_can_use_cache_function(
+            get_can_use_cache(
+                first_hidden_states_residual,
+                threshold=self.residual_diff_threshold,
+            )
         )
 
         torch._dynamo.graph_break()
