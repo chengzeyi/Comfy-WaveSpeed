@@ -50,9 +50,8 @@ class ApplyFBCacheOnModel:
                 ),
                 "max_consecutive_cache_hits": (
                     "INT", {
-                        "default": 2,
-                        "min": 1,
-                        "tooltip": "Allows limiting how many cached results can be used in a row. For example, setting this to 1 will mean there will be at least one full model call after each cached result.",
+                        "default": -1,
+                        "tooltip": "Allows limiting how many cached results can be used in a row. For example, setting this to 1 will mean there will be at least one full model call after each cached result. Set to 0 or lower to disable cache limiting.",
                     },
                 ),
             }
@@ -68,9 +67,9 @@ class ApplyFBCacheOnModel:
         model,
         object_to_patch,
         residual_diff_threshold,
-        max_consecutive_cache_hits=None,
-        start=None,
-        end=None,
+        max_consecutive_cache_hits=-1,
+        start=0.0,
+        end=1.0,
     ):
         if residual_diff_threshold <= 0:
             return (model,)
@@ -95,24 +94,24 @@ class ApplyFBCacheOnModel:
         if hasattr(diffusion_model, "single_blocks"):
             single_blocks_name = "single_blocks"
 
-        if start is not None or end is not None:
+        using_validation = max_consecutive_cache_hits > 0 or start > 0 or end < 1
+        if using_validation:
             model_sampling = model.get_model_object("model_sampling")
             start_sigma, end_sigma = (
-                None if pct is None else float(model_sampling.percent_to_sigma(pct))
+                float(model_sampling.percent_to_sigma(pct))
                 for pct in (start, end)
             )
             del model_sampling
-        else:
-            start_sigma = end_sigma = None
 
-        @torch.compiler.disable()
-        def validate_use_cache(use_cached):
-            nonlocal consecutive_cache_hits
-            use_cached = use_cached and (start_sigma is None or current_timestep <= start_sigma)
-            use_cached = use_cached and (end_sigma is None or current_timestep >= end_sigma)
-            use_cached = use_cached and (max_consecutive_cache_hits is None or consecutive_cache_hits < max_consecutive_cache_hits)
-            consecutive_cache_hits = consecutive_cache_hits + 1 if use_cached else 0
-            return use_cached
+            @torch.compiler.disable()
+            def validate_use_cache(use_cached):
+                nonlocal consecutive_cache_hits
+                use_cached = use_cached and end_sigma <= current_timestep <= start_sigma
+                use_cached = use_cached and (max_consecutive_cache_hits < 1 or consecutive_cache_hits < max_consecutive_cache_hits)
+                consecutive_cache_hits = consecutive_cache_hits + 1 if use_cached else 0
+                return use_cached
+        else:
+            validate_use_cache = None
 
         cached_transformer_blocks = torch.nn.ModuleList([
             first_block_cache.CachedTransformerBlocks(
