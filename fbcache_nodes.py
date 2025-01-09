@@ -30,6 +30,31 @@ class ApplyFBCacheOnModel:
                         "tooltip": "Controls the tolerance for caching with lower values being more strict. Setting this to 0 disables the FBCache effect.",
                     },
                 ),
+                "start": (
+                    "FLOAT", {
+                        "default": 0.0,
+                        "step": 0.01,
+                        "max": 1.0,
+                        "min": 0.0,
+                        "tooltip": "Start time as a percentage of sampling where the FBCache effect can apply. Example: 0.0 would signify 0% (the beginning of sampling), 0.5 would signify 50%.",
+                    },
+                ),
+                "end": (
+                    "FLOAT", {
+                        "default": 1.0,
+                        "step": 0.01,
+                        "max": 1.0,
+                        "min": 0.0,
+                        "tooltip": "End time as a percentage of sampling where the FBCache effect can apply. Example: 1.0 would signify 100% (the end of sampling), 0.5 would signify 50%.",
+                    }
+                ),
+                "max_consecutive_cache_hits": (
+                    "INT", {
+                        "default": 2,
+                        "min": 1,
+                        "tooltip": "Allows limiting how many cached results can be used in a row. For example, setting this to 1 will mean there will be at least one full model call after each cached result.",
+                    },
+                ),
             }
         }
 
@@ -44,8 +69,8 @@ class ApplyFBCacheOnModel:
         object_to_patch,
         residual_diff_threshold,
         max_consecutive_cache_hits=None,
-        start_percent=None,
-        end_percent=None,
+        start=None,
+        end=None,
     ):
         if residual_diff_threshold <= 0:
             return (model,)
@@ -70,11 +95,11 @@ class ApplyFBCacheOnModel:
         if hasattr(diffusion_model, "single_blocks"):
             single_blocks_name = "single_blocks"
 
-        if start_percent is not None or end_percent is not None:
+        if start is not None or end is not None:
             model_sampling = model.get_model_object("model_sampling")
             start_sigma, end_sigma = (
                 None if pct is None else float(model_sampling.percent_to_sigma(pct))
-                for pct in (start_percent, end_percent)
+                for pct in (start, end)
             )
             del model_sampling
         else:
@@ -141,37 +166,3 @@ class ApplyFBCacheOnModel:
 
         model.set_model_unet_function_wrapper(model_unet_function_wrapper)
         return (model, )
-
-
-class ApplyFBCacheOnModelAdvanced(ApplyFBCacheOnModel):
-    @classmethod
-    def INPUT_TYPES(cls):
-        result = super().INPUT_TYPES()
-        result["required"] |= {
-            "start_percent": (
-                "FLOAT", {
-                    "default": 0.0,
-                    "step": 0.01,
-                    "max": 1.0,
-                    "min": 0.0,
-                    "tooltip": "Start time as a percentage of sampling where the FBCache effect can apply.",
-                },
-            ),
-            "end_percent": (
-                "FLOAT", {
-                    "default": 1.0,
-                    "step": 0.01,
-                    "max": 1.0,
-                    "min": 0.0,
-                    "tooltip": "End time as a percentage of sampling where the FBCache effect can apply.",
-                }
-            ),
-            "max_consecutive_cache_hits": (
-                "INT", {
-                    "default": 2,
-                    "min": 1,
-                    "tooltip": "Allows putting a limit on how many cached results can be used in a row. For example, setting this to 1 will mean there will be at least one full model call after each cached result.",
-                },
-            ),
-        }
-        return result
