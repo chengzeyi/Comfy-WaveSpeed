@@ -77,6 +77,8 @@ def cache_context(cache_context):
 
 @torch.compiler.disable()
 def are_two_tensors_similar(t1, t2, *, threshold):
+    if t1.shape != t2.shape:
+        return False
     mean_diff = (t1 - t2).abs().mean()
     mean_t1 = t1.abs().mean()
     diff = mean_diff / mean_t1
