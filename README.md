@@ -39,7 +39,7 @@ You can find demo workflows in the `workflows` folder.
 
 [SDXL with First Block Cache](./workflows/sdxl.json)
 
-**NOTE**: The compilation node requires your computation to meet some software and hardware requirements, please refer to the [Enhanced `torch.compile`](Enhanced `torch.compile`) section for more information.
+**NOTE**: The compilation node requires your computation to meet some software and hardware requirements, please refer to the [Enhanced `torch.compile`](#enhanced-torchcompile) section for more information.
 
 ## Dynamic Caching ([First Block Cache](https://github.com/chengzeyi/ParaAttention?tab=readme-ov-file#first-block-cache-our-dynamic-caching))
 
