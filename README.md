@@ -67,6 +67,8 @@ Some configurations for different models that you can try:
 | `sd3.5_large_fp8_scaled.safetensors` | 30 | 0.12 |
 | `sd_xl_base_1.0.safetensors` | 25 | 0.2 |
 
+**NOTE**: SDXL First Block Cache is incompatible with the [FreeU Advanced](https://github.com/WASasquatch/FreeU_Advanced) node pack and will not function properly if it is installed and enabled.
+
 See [Apply First Block Cache on FLUX.1-dev](https://github.com/chengzeyi/ParaAttention/blob/main/doc/fastest_flux.md#apply-first-block-cache-on-flux1-dev) for more information and detailed comparison on quality and speed.
 
 ![Usage of First Block Cache](./assets/usage_fbcache.png)

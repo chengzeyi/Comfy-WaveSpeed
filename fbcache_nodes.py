@@ -115,8 +115,38 @@ class ApplyFBCacheOnModel:
             validate_use_cache = None
 
         prev_timestep = None
+        prev_input_state = None
         current_timestep = None
         consecutive_cache_hits = 0
+
+        def reset_cache_state():
+            # Resets the cache state and hits/time tracking variables.
+            nonlocal prev_input_state, prev_timestep, consecutive_cache_hits
+            prev_input_state = prev_timestep = None
+            consecutive_cache_hits = 0
+            first_block_cache.set_current_cache_context(
+                first_block_cache.create_cache_context())
+
+        def ensure_cache_state(model_input: torch.Tensor, timestep: float):
+            # Validates the current cache state and hits/time tracking variables
+            # and triggers a reset if necessary. Also updates current_timestep.
+            nonlocal current_timestep
+            input_state = (model_input.shape, model_input.dtype, model_input.device)
+            need_reset = (
+                prev_timestep is None or
+                prev_input_state != input_state or
+                first_block_cache.get_current_cache_context() is None or
+                timestep >= prev_timestep
+            )
+            if need_reset:
+                reset_cache_state()
+            current_timestep = timestep
+
+        def update_cache_state(model_input: torch.Tensor, timestep: float):
+            # Updates the previous timestep and input state validation variables.
+            nonlocal prev_timestep, prev_input_state
+            prev_timestep = timestep
+            prev_input_state = (model_input.shape, model_input.dtype, model_input.device)
 
         model = model.clone()
         diffusion_model = model.get_model_object(object_to_patch)
@@ -131,35 +161,27 @@ class ApplyFBCacheOnModel:
                 raise ValueError(
                     f"Unsupported model {diffusion_model.__class__.__name__}")
 
-            patch_foward = create_patch_function(
+            patch_forward = create_patch_function(
                 diffusion_model,
                 residual_diff_threshold=residual_diff_threshold,
                 validate_can_use_cache_function=validate_use_cache,
             )
 
             def model_unet_function_wrapper(model_function, kwargs):
-                nonlocal prev_timestep, current_timestep, consecutive_cache_hits
-
                 try:
                     input = kwargs["input"]
                     timestep = kwargs["timestep"]
                     c = kwargs["c"]
-                    current_timestep = t = timestep[0].item()
+                    t = timestep[0].item()
 
-                    if prev_timestep is None or t >= prev_timestep:
-                        prev_timestep = t
-                        consecutive_cache_hits = 0
-                        first_block_cache.set_current_cache_context(
-                            first_block_cache.create_cache_context())
+                    ensure_cache_state(input, t)
 
-                    if first_block_cache.get_current_cache_context() is None:
-                        first_block_cache.set_current_cache_context(
-                            first_block_cache.create_cache_context())
-
-                    with patch_foward():
-                        return model_function(input, timestep, **c)
-                except model_management.InterruptProcessingException as exc:
-                    prev_timestep = None
+                    with patch_forward():
+                        result = model_function(input, timestep, **c)
+                        update_cache_state(input, t)
+                        return result
+                except Exception as exc:
+                    reset_cache_state()
                     raise exc from None
         else:
             is_non_native_ltxv = False
@@ -224,23 +246,13 @@ class ApplyFBCacheOnModel:
             dummy_single_transformer_blocks = torch.nn.ModuleList()
 
             def model_unet_function_wrapper(model_function, kwargs):
-                nonlocal prev_timestep, current_timestep, consecutive_cache_hits
-
                 try:
                     input = kwargs["input"]
                     timestep = kwargs["timestep"]
                     c = kwargs["c"]
-                    current_timestep = t = timestep[0].item()
+                    t = timestep[0].item()
 
-                    if prev_timestep is None or t >= prev_timestep:
-                        prev_timestep = t
-                        consecutive_cache_hits = 0
-                        first_block_cache.set_current_cache_context(
-                            first_block_cache.create_cache_context())
-
-                    if first_block_cache.get_current_cache_context() is None:
-                        first_block_cache.set_current_cache_context(
-                            first_block_cache.create_cache_context())
+                    ensure_cache_state(input, t)
 
                     with unittest.mock.patch.object(
                             diffusion_model,
@@ -252,9 +264,11 @@ class ApplyFBCacheOnModel:
                             dummy_single_transformer_blocks,
                     ) if single_blocks_name is not None else contextlib.nullcontext(
                     ):
-                        return model_function(input, timestep, **c)
-                except model_management.InterruptProcessingException as exc:
-                    prev_timestep = None
+                        result = model_function(input, timestep, **c)
+                        update_cache_state(input, t)
+                        return result
+                except Exception as exc:
+                    reset_cache_state()
                     raise exc from None
 
         model.set_model_unet_function_wrapper(model_unet_function_wrapper)

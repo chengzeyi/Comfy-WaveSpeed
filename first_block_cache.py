@@ -386,12 +386,10 @@ def create_patch_unet_model__forward(model,
     from comfy.ldm.modules.diffusionmodules.openaimodel import timestep_embedding, forward_timestep_embed, apply_control
 
     def call_remaining_blocks(self, transformer_options, control,
-                              transformer_patches, hs, h, *args, **kwargs):
+                              transformer_patches, hs, h, *args, start_block=2, **kwargs):
         original_hidden_states = h
 
-        for id, module in enumerate(self.input_blocks):
-            if id < 2:
-                continue
+        for id, module in enumerate(self.input_blocks[start_block:], start=start_block):
             transformer_options["block"] = ("input", id)
             h = forward_timestep_embed(module, h, *args, **kwargs)
             h = apply_control(h, control, 'input')
@@ -478,9 +476,7 @@ def create_patch_unet_model__forward(model,
         can_use_cache = False
 
         h = x
-        for id, module in enumerate(self.input_blocks):
-            if id >= 2:
-                break
+        for id, module in enumerate(self.input_blocks[:2]):
             transformer_options["block"] = ("input", id)
             if id == 1:
                 original_h = h
