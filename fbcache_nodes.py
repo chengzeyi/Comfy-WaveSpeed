@@ -129,21 +129,35 @@ class ApplyFBCacheOnModel:
 
         def ensure_cache_state(model_input: torch.Tensor, timestep: float):
             # Validates the current cache state and hits/time tracking variables
-            # and triggers a reset if necessary. Also updates current_timestep.
+            # and triggers a reset if necessary. Also updates current_timestep and
+            # maintains the cache context sequence number.
             nonlocal current_timestep
-            input_state = (model_input.shape[1:], model_input.dtype, model_input.device)
+            input_state = (model_input.shape, model_input.dtype, model_input.device)
             cache_context = first_block_cache.get_current_cache_context()
+            # We reset when:
             need_reset = (
+                # The previous timestep or input state is not set
                 prev_timestep is None or
+                prev_input_state is None or
+                # Or dtype/device have changed
                 prev_input_state[1:] != input_state[1:] or
+                # Or the input state after the batch dimension has changed
+                prev_input_state[0][1:] != input_state[0][1:] or
+                # Or there is no cache context (in this case reset is just making a context)
                 cache_context is None or
+                # Or the current timestep is higher than the previous one
                 timestep > prev_timestep
             )
             if need_reset:
                 reset_cache_state()
             elif timestep == prev_timestep:
+                # When the current timestep is the same as the previous, we assume ComfyUI has split up
+                # the model evaluation into multiple chunks. In this case, we increment the sequence number.
+                # Note: No need to check if cache_context is None for these branches as need_reset would be True
+                #       if so.
                 cache_context.sequence_num += 1
             elif timestep < prev_timestep:
+                # When the timestep is less than the previous one, we can reset the context sequence number
                 cache_context.sequence_num = 0
             current_timestep = timestep
 
