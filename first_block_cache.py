@@ -13,6 +13,7 @@ class CacheContext:
     incremental_name_counters: DefaultDict[str, int] = dataclasses.field(
         default_factory=lambda: defaultdict(int))
     sequence_num: int = 0
+    use_cache: bool = False
 
     def get_incremental_name(self, name=None):
         if name is None:
@@ -109,9 +110,11 @@ def patch_get_output_data():
 
 
 @torch.compiler.disable()
-def are_two_tensors_similar(t1, t2, *, threshold):
+def are_two_tensors_similar(t1, t2, *, threshold, only_shape=False):
     if t1.shape != t2.shape:
         return False
+    elif only_shape:
+        return True
     mean_diff = (t1 - t2).abs().mean()
     mean_t1 = t1.abs().mean()
     diff = mean_diff / mean_t1
@@ -143,14 +146,24 @@ def apply_prev_hidden_states_residual(hidden_states,
 @torch.compiler.disable()
 def get_can_use_cache(first_hidden_states_residual,
                       threshold,
-                      parallelized=False):
+                      parallelized=False,
+                      validation_function=None):
     prev_first_hidden_states_residual = get_buffer(
         "first_hidden_states_residual")
-    can_use_cache = prev_first_hidden_states_residual is not None and are_two_tensors_similar(
+    cache_context = get_current_cache_context()
+    if cache_context is None or prev_first_hidden_states_residual is None:
+        return False
+    can_use_cache = are_two_tensors_similar(
         prev_first_hidden_states_residual,
         first_hidden_states_residual,
         threshold=threshold,
+        only_shape=cache_context.sequence_num > 0,
     )
+    if cache_context.sequence_num > 0:
+        return can_use_cache and cache_context.use_cache
+    if validation_function is not None:
+        can_use_cache = validation_function(can_use_cache)
+    cache_context.use_cache = can_use_cache
     return can_use_cache
 
 
@@ -281,9 +294,8 @@ class CachedTransformerBlocks(torch.nn.Module):
         can_use_cache = get_can_use_cache(
             first_hidden_states_residual,
             threshold=self.residual_diff_threshold,
+            validation_function=self.validate_can_use_cache_function,
         )
-        if self.validate_can_use_cache_function is not None:
-            can_use_cache = self.validate_can_use_cache_function(can_use_cache)
 
         torch._dynamo.graph_break()
         if can_use_cache:
@@ -520,10 +532,8 @@ def create_patch_unet_model__forward(model,
                 can_use_cache = get_can_use_cache(
                     first_hidden_states_residual,
                     threshold=residual_diff_threshold,
+                    validation_function=validate_can_use_cache_function,
                 )
-                if validate_can_use_cache_function is not None:
-                    can_use_cache = validate_can_use_cache_function(
-                        can_use_cache)
                 if not can_use_cache:
                     set_buffer("first_hidden_states_residual",
                                first_hidden_states_residual)
@@ -788,10 +798,8 @@ def create_patch_flux_forward_orig(model,
                 can_use_cache = get_can_use_cache(
                     first_hidden_states_residual,
                     threshold=residual_diff_threshold,
+                    validation_function=validate_can_use_cache_function,
                 )
-                if validate_can_use_cache_function is not None:
-                    can_use_cache = validate_can_use_cache_function(
-                        can_use_cache)
                 if not can_use_cache:
                     set_buffer("first_hidden_states_residual",
                                first_hidden_states_residual)
