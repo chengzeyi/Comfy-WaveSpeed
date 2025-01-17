@@ -9,9 +9,10 @@ import torch
 
 @dataclasses.dataclass
 class CacheContext:
-    buffers: Dict[str, torch.Tensor] = dataclasses.field(default_factory=dict)
+    buffers: Dict[str, list] = dataclasses.field(default_factory=dict)
     incremental_name_counters: DefaultDict[str, int] = dataclasses.field(
         default_factory=lambda: defaultdict(int))
+    sequence_num: int = 0
 
     def get_incremental_name(self, name=None):
         if name is None:
@@ -25,13 +26,22 @@ class CacheContext:
 
     @torch.compiler.disable()
     def get_buffer(self, name):
-        return self.buffers.get(name)
+        item = self.buffers.get(name)
+        if item is None or self.sequence_num >= len(item):
+            return None
+        return item[self.sequence_num]
 
     @torch.compiler.disable()
     def set_buffer(self, name, buffer):
-        self.buffers[name] = buffer
+        curr_item = self.buffers.get(name)
+        if curr_item is None:
+            curr_item = []
+            self.buffers[name] = curr_item
+        curr_item += [None] * (self.sequence_num - len(curr_item) + 1)
+        curr_item[self.sequence_num] = buffer
 
     def clear_buffers(self):
+        self.sequence_num = 0
         self.buffers.clear()
 
 

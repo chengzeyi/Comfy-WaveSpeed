@@ -131,15 +131,20 @@ class ApplyFBCacheOnModel:
             # Validates the current cache state and hits/time tracking variables
             # and triggers a reset if necessary. Also updates current_timestep.
             nonlocal current_timestep
-            input_state = (model_input.shape, model_input.dtype, model_input.device)
+            input_state = (model_input.shape[1:], model_input.dtype, model_input.device)
+            cache_context = first_block_cache.get_current_cache_context()
             need_reset = (
                 prev_timestep is None or
-                prev_input_state != input_state or
-                first_block_cache.get_current_cache_context() is None or
-                timestep >= prev_timestep
+                prev_input_state[1:] != input_state[1:] or
+                cache_context is None or
+                timestep > prev_timestep
             )
             if need_reset:
                 reset_cache_state()
+            elif timestep == prev_timestep:
+                cache_context.sequence_num += 1
+            elif timestep < prev_timestep:
+                cache_context.sequence_num = 0
             current_timestep = timestep
 
         def update_cache_state(model_input: torch.Tensor, timestep: float):
