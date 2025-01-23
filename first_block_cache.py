@@ -160,11 +160,12 @@ def get_can_use_cache(first_hidden_states_residual,
         only_shape=cache_context.sequence_num > 0,
     )
     if cache_context.sequence_num > 0:
-        return can_use_cache and cache_context.use_cache
-    if validation_function is not None:
-        can_use_cache = validation_function(can_use_cache)
-    cache_context.use_cache = can_use_cache
-    return can_use_cache
+        cache_context.use_cache &= can_use_cache
+    else:
+        if validation_function is not None:
+            can_use_cache = validation_function(can_use_cache)
+        cache_context.use_cache = can_use_cache
+    return cache_context.use_cache
 
 
 class CachedTransformerBlocks(torch.nn.Module):
