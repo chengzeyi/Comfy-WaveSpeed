@@ -147,12 +147,13 @@ def apply_prev_hidden_states_residual(hidden_states,
 def get_can_use_cache(first_hidden_states_residual,
                       threshold,
                       parallelized=False,
-                      validation_function=None):
+                      validation_function=None,
+                      scheduler_step=None):
     prev_first_hidden_states_residual = get_buffer(
         "first_hidden_states_residual")
     cache_context = get_current_cache_context()
     if cache_context is None or prev_first_hidden_states_residual is None:
-        return False
+        return False, False
     can_use_cache = are_two_tensors_similar(
         prev_first_hidden_states_residual,
         first_hidden_states_residual,
@@ -162,10 +163,13 @@ def get_can_use_cache(first_hidden_states_residual,
     if cache_context.sequence_num > 0:
         cache_context.use_cache &= can_use_cache
     else:
-        if validation_function is not None:
-            can_use_cache = validation_function(can_use_cache)
         cache_context.use_cache = can_use_cache
-    return cache_context.use_cache
+        if validation_function is not None:
+            if scheduler_step is not None:
+                can_use_cache, is_seg_end = validation_function(can_use_cache, scheduler_step)
+            else:
+                can_use_cache = validation_function(can_use_cache)
+    return cache_context.use_cache, is_seg_end if scheduler_step else None
 
 
 class CachedTransformerBlocks(torch.nn.Module):
@@ -177,6 +181,7 @@ class CachedTransformerBlocks(torch.nn.Module):
         *,
         residual_diff_threshold,
         validate_can_use_cache_function=None,
+        scheduler_step=None,
         return_hidden_states_first=True,
         accept_hidden_states_first=True,
         cat_hidden_states_first=False,
@@ -193,6 +198,7 @@ class CachedTransformerBlocks(torch.nn.Module):
         self.cat_hidden_states_first = cat_hidden_states_first
         self.return_hidden_states_only = return_hidden_states_only
         self.clone_original_hidden_states = clone_original_hidden_states
+        self.scheduler_step = 0
 
     def forward(self, *args, **kwargs):
         img_arg_name = None
@@ -231,7 +237,7 @@ class CachedTransformerBlocks(torch.nn.Module):
                 img = kwargs.pop(img_arg_name)
         hidden_states = img
         encoder_hidden_states = txt
-        if self.residual_diff_threshold <= 0.0:
+        if not isinstance(self.residual_diff_threshold, list) and self.residual_diff_threshold <= 0.0:
             for block in self.transformer_blocks:
                 if txt_arg_name == "encoder_hidden_states":
                     hidden_states = block(
@@ -292,12 +298,21 @@ class CachedTransformerBlocks(torch.nn.Module):
         first_hidden_states_residual = hidden_states - original_hidden_states
         del original_hidden_states
 
-        can_use_cache = get_can_use_cache(
-            first_hidden_states_residual,
-            threshold=self.residual_diff_threshold,
-            validation_function=self.validate_can_use_cache_function,
-        )
-
+        if isinstance(self.residual_diff_threshold, list):
+            can_use_cache, is_seg_end = get_can_use_cache(
+                first_hidden_states_residual,
+                threshold=self.residual_diff_threshold[self.scheduler_step],
+                validation_function=self.validate_can_use_cache_function,
+                scheduler_step=self.scheduler_step
+            )
+            if is_seg_end:
+                self.scheduler_step = self.scheduler_step + 1
+        else:
+            can_use_cache, _ = get_can_use_cache(
+                first_hidden_states_residual,
+                threshold=self.residual_diff_threshold,
+                validation_function=self.validate_can_use_cache_function,
+            )
         torch._dynamo.graph_break()
         if can_use_cache:
             del first_hidden_states_residual
@@ -406,9 +421,12 @@ class CachedTransformerBlocks(torch.nn.Module):
 def create_patch_unet_model__forward(model,
                                      *,
                                      residual_diff_threshold,
-                                     validate_can_use_cache_function=None):
+                                     validate_can_use_cache_function=None,
+                                     scheduler_step=None):
     from comfy.ldm.modules.diffusionmodules.openaimodel import timestep_embedding, forward_timestep_embed, apply_control
-
+    
+    scheduler_step = 0
+    
     def call_remaining_blocks(self, transformer_options, control,
                               transformer_patches, hs, h, *args, **kwargs):
         original_hidden_states = h
@@ -531,11 +549,22 @@ def create_patch_unet_model__forward(model,
 
             if id == 1:
                 first_hidden_states_residual = h - original_h
-                can_use_cache = get_can_use_cache(
-                    first_hidden_states_residual,
-                    threshold=residual_diff_threshold,
-                    validation_function=validate_can_use_cache_function,
-                )
+                if isinstance(residual_diff_threshold, list):
+                    nonlocal scheduler_step
+                    can_use_cache, is_seg_end = get_can_use_cache(
+                        first_hidden_states_residual,
+                        threshold=residual_diff_threshold[scheduler_step],
+                        validation_function=validate_can_use_cache_function,
+                        scheduler_step=scheduler_step
+                    )
+                    if is_seg_end:
+                        scheduler_step = scheduler_step + 1
+                else:
+                    can_use_cache, _ = get_can_use_cache(
+                        first_hidden_states_residual,
+                        threshold=residual_diff_threshold,
+                        validation_function=validate_can_use_cache_function,
+                    )
                 if not can_use_cache:
                     set_buffer("first_hidden_states_residual",
                                first_hidden_states_residual)
@@ -585,7 +614,9 @@ def create_patch_flux_forward_orig(model,
                                    validate_can_use_cache_function=None):
     from torch import Tensor
     from comfy.ldm.flux.model import timestep_embedding
-
+    
+    scheduler_step = 0
+    
     def call_remaining_blocks(self, blocks_replace, control, img, txt, vec, pe,
                               attn_mask, ca_idx, timesteps, transformer_options):
         original_hidden_states = img
@@ -797,11 +828,22 @@ def create_patch_flux_forward_orig(model,
 
             if i == 0:
                 first_hidden_states_residual = img
-                can_use_cache = get_can_use_cache(
-                    first_hidden_states_residual,
-                    threshold=residual_diff_threshold,
-                    validation_function=validate_can_use_cache_function,
-                )
+                if isinstance(residual_diff_threshold, list):
+                    nonlocal scheduler_step
+                    can_use_cache, is_seg_end = get_can_use_cache(
+                        first_hidden_states_residual,
+                        threshold=residual_diff_threshold[scheduler_step],
+                        validation_function=validate_can_use_cache_function,
+                        scheduler_step=scheduler_step
+                    )
+                    if is_seg_end:
+                        scheduler_step = scheduler_step + 1
+                else:
+                    can_use_cache, _ = get_can_use_cache(
+                        first_hidden_states_residual,
+                        threshold=residual_diff_threshold,
+                        validation_function=validate_can_use_cache_function,
+                    )
                 if not can_use_cache:
                     set_buffer("first_hidden_states_residual",
                                first_hidden_states_residual)
