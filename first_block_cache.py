@@ -258,6 +258,8 @@ class CachedTransformerBlocks(torch.nn.Module):
                     [encoder_hidden_states, hidden_states],
                     dim=1)
                 for block in self.single_transformer_blocks:
+                    kwargs.pop("modulation_dims_img", None)
+                    kwargs.pop("modulation_dims_txt", None)
                     hidden_states = block(hidden_states, *args, **kwargs)
                 hidden_states = hidden_states[:,
                                               encoder_hidden_states.shape[1]:]
@@ -367,6 +369,8 @@ class CachedTransformerBlocks(torch.nn.Module):
                                       [encoder_hidden_states, hidden_states],
                                       dim=1)
             for block in self.single_transformer_blocks:
+                kwargs.pop("modulation_dims_img", None)
+                kwargs.pop("modulation_dims_txt", None)
                 hidden_states = block(hidden_states, *args, **kwargs)
             if self.cat_hidden_states_first:
                 hidden_states, encoder_hidden_states = hidden_states.split(
