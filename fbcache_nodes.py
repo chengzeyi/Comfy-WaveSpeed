@@ -208,6 +208,12 @@ class ApplyFBCacheOnModel:
                 is_non_native_ltxv = True
                 diffusion_model = diffusion_model.transformer
 
+            # Decide on the MRO, not on the leaf class name. LTX-2.5 ships
+            # `LTXAVModel(LTXVModel)`, and a name comparison gives a subclass none of the
+            # handling its base was given.
+            is_ltxv = any(base.__name__ == "LTXVModel"
+                          for base in type(diffusion_model).__mro__)
+
             double_blocks_name = None
             single_blocks_name = None
             if hasattr(diffusion_model, "transformer_blocks"):
@@ -252,10 +258,7 @@ class ApplyFBCacheOnModel:
                     validate_can_use_cache_function=validate_use_cache,
                     cat_hidden_states_first=diffusion_model.__class__.__name__
                     == "HunyuanVideo",
-                    return_hidden_states_only=diffusion_model.__class__.
-                    __name__ == "LTXVModel" or is_non_native_ltxv,
-                    clone_original_hidden_states=diffusion_model.__class__.
-                    __name__ == "LTXVModel",
+                    return_hidden_states_only=is_ltxv or is_non_native_ltxv,
                     return_hidden_states_first=diffusion_model.__class__.
                     __name__ != "OpenAISignatureMMDITWrapper",
                     accept_hidden_states_first=diffusion_model.__class__.

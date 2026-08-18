@@ -181,7 +181,6 @@ class CachedTransformerBlocks(torch.nn.Module):
         accept_hidden_states_first=True,
         cat_hidden_states_first=False,
         return_hidden_states_only=False,
-        clone_original_hidden_states=False,
     ):
         super().__init__()
         self.transformer_blocks = transformer_blocks
@@ -192,7 +191,6 @@ class CachedTransformerBlocks(torch.nn.Module):
         self.accept_hidden_states_first = accept_hidden_states_first
         self.cat_hidden_states_first = cat_hidden_states_first
         self.return_hidden_states_only = return_hidden_states_only
-        self.clone_original_hidden_states = clone_original_hidden_states
 
     def forward(self, *args, **kwargs):
         img_arg_name = None
@@ -270,9 +268,10 @@ class CachedTransformerBlocks(torch.nn.Module):
                         if self.return_hidden_states_first else
                         (encoder_hidden_states, hidden_states))
 
-        original_hidden_states = hidden_states
-        if self.clone_original_hidden_states:
-            original_hidden_states = original_hidden_states.clone()
+        # A copy, always. ComfyUI's transformer blocks update their input in place and hand
+        # the same object back -- `img += ...` in comfy/ldm/flux/layers.py -- so an alias here
+        # makes the subtraction below `x - x`.
+        original_hidden_states = hidden_states.clone()
         first_transformer_block = self.transformer_blocks[0]
         if txt_arg_name == "encoder_hidden_states":
             hidden_states = first_transformer_block(
@@ -339,12 +338,9 @@ class CachedTransformerBlocks(torch.nn.Module):
                                           *args,
                                           txt_arg_name=None,
                                           **kwargs):
-        original_hidden_states = hidden_states
-        original_encoder_hidden_states = encoder_hidden_states
-        if self.clone_original_hidden_states:
-            original_hidden_states = original_hidden_states.clone()
-            original_encoder_hidden_states = original_encoder_hidden_states.clone(
-            )
+        original_hidden_states = hidden_states.clone()
+        original_encoder_hidden_states = (
+            None if encoder_hidden_states is None else encoder_hidden_states.clone())
         for block in self.transformer_blocks[1:]:
             if txt_arg_name == "encoder_hidden_states":
                 hidden_states = block(
@@ -592,7 +588,10 @@ def create_patch_flux_forward_orig(model,
 
     def call_remaining_blocks(self, blocks_replace, control, img, txt, vec, pe,
                               attn_mask, ca_idx, timesteps, transformer_options):
-        original_hidden_states = img
+        # DoubleStreamBlock updates `img` in place and returns it, so without a copy the
+        # residual below is measured against a value the double blocks have already changed
+        # and carries only the single blocks' contribution.
+        original_hidden_states = img.clone()
 
         extra_block_forward_kwargs = {}
         if attn_mask is not None:
