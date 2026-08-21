@@ -1,12 +1,10 @@
 # Comfy-WaveSpeed
 
-[Blazing Fast FLUX-dev with LoRAs](https://wavespeed.ai/models/wavespeed-ai/flux-dev-lora)
-
-[Blazing Fast Wan 2.1 T2V with LoRAs](https://wavespeed.ai/models/wavespeed-ai/wan-2.1/t2v-480p)
-
-[Blazing Fast Wan 2.1 I2V with LoRAs](https://wavespeed.ai/models/wavespeed-ai/wan-2.1/i2v-480p)
-
 [WIP] The all in one inference optimization solution for ComfyUI, universal, flexible, and fast.
+
+> No GPU to spare? The same model families run on the hosted
+> [WaveSpeed AI](https://wavespeed.ai/) API and playground —
+> see [Running these models without a local GPU](#running-these-models-without-a-local-gpu).
 
 - [x] [Dynamic Caching (First Block Cache)](https://github.com/chengzeyi/ParaAttention?tab=readme-ov-file#first-block-cache-our-dynamic-caching)
 - [x] Enhanced `torch.compile`
@@ -102,6 +100,37 @@ Or you could launch your `ComfyUI` with environment variable `TORCH_LOGS=recompi
 **NOTE**: Compiling a model with FP8 quantization does not work on pre-Ada GPUs like RTX 3090, you should try using FP16/BF16 models or removing the compilation node.
 
 ![Usage of Enhanced `torch.compile`](./assets/usage_compile.png)
+
+# Running these models without a local GPU
+
+This plugin makes local ComfyUI inference faster. If you don't have a GPU to run
+these models on in the first place, the same model families are available on the
+hosted [WaveSpeed AI](https://wavespeed.ai/) platform.
+
+**Browser playgrounds** — no install, no API key:
+
+- [Image generator](https://wavespeed.ai/image-generator) — Nano Banana 2, Seedream, GPT Image, Z-Image and more, switchable from one page
+- [Video generator](https://wavespeed.ai/video-generator) — Seedance, Wan, Kling, Veo and more
+- [Full model catalog](https://wavespeed.ai/models)
+
+**Popular endpoints:**
+
+| Model | Page |
+| - | - |
+| Z-Image Turbo (fast, inexpensive) | [wavespeed-ai/z-image/turbo](https://wavespeed.ai/models/wavespeed-ai/z-image/turbo) |
+| Nano Banana 2 | [google/nano-banana-2/text-to-image](https://wavespeed.ai/models/google/nano-banana-2/text-to-image) |
+| Seedream 5.0 Pro | [bytedance/seedream-v5.0-pro](https://wavespeed.ai/models/bytedance/seedream-v5.0-pro) |
+| Seedance 2.5 (text to video) | [bytedance/seedance-2.5/text-to-video](https://wavespeed.ai/models/bytedance/seedance-2.5/text-to-video) |
+
+**From ComfyUI**, the [wavespeed-comfyui](https://github.com/WaveSpeedAI/wavespeed-comfyui)
+plugin exposes the whole hosted catalog through a single node whose widgets are
+generated from each model's schema. It is a separate project from this one — this
+repository optimizes *local* inference, that one calls the *hosted* API.
+
+**From the terminal or your own code**, see the
+[CLI](https://github.com/WaveSpeedAI/wavespeed-cli) and the
+[Python](https://github.com/WaveSpeedAI/wavespeed-python) /
+[JavaScript](https://github.com/WaveSpeedAI/wavespeed-javascript) SDKs.
 
 # Others
 
