@@ -2,8 +2,8 @@
 
 The all in one inference optimization solution for ComfyUI, universal, flexible, and fast.
 
-> No GPU to spare? The same model families run on the hosted
-> [WaveSpeed AI](https://wavespeed.ai/) API and playground —
+> No GPU to spare? The same model families run on
+> [WaveSpeed AI](https://wavespeed.ai/), an AI image & video generation platform —
 > see [Running these models without a local GPU](#running-these-models-without-a-local-gpu).
 
 Available today:
@@ -109,8 +109,8 @@ Or you could launch your `ComfyUI` with environment variable `TORCH_LOGS=recompi
 # Running these models without a local GPU
 
 This plugin makes local ComfyUI inference faster. If you don't have a GPU to run
-these models on in the first place, the same model families are available on the
-hosted [WaveSpeed AI](https://wavespeed.ai/) platform.
+these models on in the first place, the same model families are available on
+[WaveSpeed AI](https://wavespeed.ai/), an AI image & video generation platform.
 
 **Browser playgrounds** — no install, no API key:
 
