@@ -1,15 +1,17 @@
 # Comfy-WaveSpeed
 
-[WIP] The all in one inference optimization solution for ComfyUI, universal, flexible, and fast.
+The all in one inference optimization solution for ComfyUI, universal, flexible, and fast.
 
 > No GPU to spare? The same model families run on the hosted
 > [WaveSpeed AI](https://wavespeed.ai/) API and playground —
 > see [Running these models without a local GPU](#running-these-models-without-a-local-gpu).
 
+Available today:
+
 - [x] [Dynamic Caching (First Block Cache)](https://github.com/chengzeyi/ParaAttention?tab=readme-ov-file#first-block-cache-our-dynamic-caching)
 - [x] Enhanced `torch.compile`
 
-More to come...
+Considered, but not implemented:
 
 - [ ] Multi-GPU Inference (ComfyUI version of [ParaAttention's Context Parallelism](https://github.com/chengzeyi/ParaAttention?tab=readme-ov-file#context-parallelism))
 
@@ -17,8 +19,11 @@ More to come...
 | - | - |
 | ![FLUX.1-dev Original](./assets/flux_original.png) | ![FLUX.1-dev with First Block Cache and Compilation](./assets/flux_optimized.png) |
 
-This is just launched, and we are working on it. Please stay tuned.
-For any request or question, please join the Discord server.
+**Project status:** the caching and compilation nodes below are stable and
+widely used, but active development on this repository is intermittent —
+please treat the unchecked item above as an idea rather than a roadmap.
+Issues and pull requests are still welcome, and the Discord server is the
+fastest way to get a question answered.
 
 [Discord Server](https://discord.gg/xtk6jUtYtr)
 
