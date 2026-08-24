@@ -195,6 +195,201 @@ class CachedTransformerBlocks(torch.nn.Module):
         self.clone_original_hidden_states = clone_original_hidden_states
 
     def forward(self, *args, **kwargs):
+        # Handle NextDiT models differently
+        if self._is_nextdit_style():
+            return self._forward_nextdit(*args, **kwargs)
+        elif self.return_hidden_states_only:
+            return self._forward_single_output(*args, **kwargs)
+        else:
+            return self._forward_standard(*args, **kwargs)
+
+    def _is_nextdit_style(self):
+        """Check if this is a NextDiT style model based on block structure"""
+        if self.transformer_blocks is None or len(self.transformer_blocks) == 0:
+            return False
+        
+        # Check if the first block has NextDiT-style signatures
+        first_block = self.transformer_blocks[0]
+        
+        # Check the class name for known NextDiT/Lumina patterns
+        block_class_name = first_block.__class__.__name__
+        if any(name in block_class_name.lower() for name in ['nextdit', 'lumina', 'dit']):
+            return True
+        
+        # NextDiT blocks typically accept (x, t, **kwargs) or similar
+        # Check for common NextDiT method signatures
+        if hasattr(first_block, 'forward'):
+            import inspect
+            try:
+                sig = inspect.signature(first_block.forward)
+                params = list(sig.parameters.keys())
+                
+                # NextDiT typically has parameters like (self, x, t, **kwargs)
+                # or (self, hidden_states, timestep, **kwargs)
+                if len(params) >= 3 and any(p in ['t', 'timestep', 'time'] for p in params):
+                    return True
+            except Exception:
+                # If signature inspection fails, fall back to other checks
+                pass
+                
+        return False
+
+    def _forward_nextdit(self, *args, **kwargs):
+        """Forward method for NextDiT style models"""
+        if self.residual_diff_threshold <= 0.0:
+            # No caching, just run normally
+            x = args[0] if args else kwargs.get('x', kwargs.get('hidden_states'))
+            
+            for block in self.transformer_blocks:
+                if args:
+                    x = block(*args, **kwargs)
+                    args = (x,) + args[1:]  # Update first arg with new x
+                else:
+                    kwargs['x'] = x if 'x' in kwargs else x
+                    kwargs['hidden_states'] = x if 'hidden_states' in kwargs else x
+                    x = block(**kwargs)
+            
+            return x
+
+        # Extract the hidden states (typically first argument or x/hidden_states in kwargs)
+        if args:
+            hidden_states = args[0]
+            remaining_args = args[1:]
+        else:
+            hidden_states = kwargs.pop('x', kwargs.pop('hidden_states', None))
+            if hidden_states is None:
+                raise ValueError("Could not find hidden states in NextDiT forward call")
+            remaining_args = ()
+
+        original_hidden_states = hidden_states
+        if self.clone_original_hidden_states:
+            original_hidden_states = original_hidden_states.clone()
+
+        # Run the first transformer block
+        first_transformer_block = self.transformer_blocks[0]
+        if remaining_args:
+            hidden_states = first_transformer_block(hidden_states, *remaining_args, **kwargs)
+        else:
+            hidden_states = first_transformer_block(hidden_states, **kwargs)
+
+        first_hidden_states_residual = hidden_states - original_hidden_states
+        del original_hidden_states
+
+        can_use_cache = get_can_use_cache(
+            first_hidden_states_residual,
+            threshold=self.residual_diff_threshold,
+            validation_function=self.validate_can_use_cache_function,
+        )
+
+        torch._dynamo.graph_break()
+        if can_use_cache:
+            del first_hidden_states_residual
+            hidden_states = apply_prev_hidden_states_residual(hidden_states)
+        else:
+            set_buffer("first_hidden_states_residual", first_hidden_states_residual)
+            del first_hidden_states_residual
+            
+            hidden_states, hidden_states_residual = self.call_remaining_nextdit_blocks(
+                hidden_states, *remaining_args, **kwargs
+            )
+            set_buffer("hidden_states_residual", hidden_states_residual)
+        torch._dynamo.graph_break()
+
+        return hidden_states
+
+    def call_remaining_nextdit_blocks(self, hidden_states, *args, **kwargs):
+        """Call remaining NextDiT blocks and compute residual"""
+        original_hidden_states = hidden_states
+        if self.clone_original_hidden_states:
+            original_hidden_states = original_hidden_states.clone()
+
+        for block in self.transformer_blocks[1:]:
+            if args:
+                hidden_states = block(hidden_states, *args, **kwargs)
+            else:
+                hidden_states = block(hidden_states, **kwargs)
+
+        hidden_states_residual = hidden_states - original_hidden_states
+        hidden_states_residual = hidden_states_residual.reshape(-1).contiguous().reshape(original_hidden_states.shape)
+        
+        return hidden_states, hidden_states_residual
+
+    def _forward_single_output(self, *args, **kwargs):
+        """Forward method for models that only return hidden states (like Lumina2)"""
+        # Extract the hidden states (typically first argument or hidden_states in kwargs)
+        if args:
+            hidden_states = args[0]
+            remaining_args = args[1:]
+        else:
+            hidden_states = kwargs.get('hidden_states', kwargs.get('x'))
+            if hidden_states is None:
+                raise ValueError("Could not find hidden states in single output forward call")
+            remaining_args = ()
+
+        if self.residual_diff_threshold <= 0.0:
+            # No caching, just run normally
+            for block in self.transformer_blocks:
+                if remaining_args:
+                    hidden_states = block(hidden_states, *remaining_args, **kwargs)
+                else:
+                    hidden_states = block(hidden_states, **kwargs)
+            return hidden_states
+
+        original_hidden_states = hidden_states
+        if self.clone_original_hidden_states:
+            original_hidden_states = original_hidden_states.clone()
+
+        # Run the first transformer block
+        first_transformer_block = self.transformer_blocks[0]
+        if remaining_args:
+            hidden_states = first_transformer_block(hidden_states, *remaining_args, **kwargs)
+        else:
+            hidden_states = first_transformer_block(hidden_states, **kwargs)
+
+        first_hidden_states_residual = hidden_states - original_hidden_states
+        del original_hidden_states
+
+        can_use_cache = get_can_use_cache(
+            first_hidden_states_residual,
+            threshold=self.residual_diff_threshold,
+            validation_function=self.validate_can_use_cache_function,
+        )
+
+        torch._dynamo.graph_break()
+        if can_use_cache:
+            del first_hidden_states_residual
+            hidden_states = apply_prev_hidden_states_residual(hidden_states)
+        else:
+            set_buffer("first_hidden_states_residual", first_hidden_states_residual)
+            del first_hidden_states_residual
+            
+            hidden_states, hidden_states_residual = self.call_remaining_single_output_blocks(
+                hidden_states, *remaining_args, **kwargs
+            )
+            set_buffer("hidden_states_residual", hidden_states_residual)
+        torch._dynamo.graph_break()
+
+        return hidden_states
+
+    def call_remaining_single_output_blocks(self, hidden_states, *args, **kwargs):
+        """Call remaining blocks for single output models and compute residual"""
+        original_hidden_states = hidden_states
+        if self.clone_original_hidden_states:
+            original_hidden_states = original_hidden_states.clone()
+
+        for block in self.transformer_blocks[1:]:
+            if args:
+                hidden_states = block(hidden_states, *args, **kwargs)
+            else:
+                hidden_states = block(hidden_states, **kwargs)
+
+        hidden_states_residual = hidden_states - original_hidden_states
+        hidden_states_residual = hidden_states_residual.reshape(-1).contiguous().reshape(original_hidden_states.shape)
+        
+        return hidden_states, hidden_states_residual
+
+    def _forward_standard(self, *args, **kwargs):
+        """Standard forward method for existing supported models"""
         img_arg_name = None
         if "img" in kwargs:
             img_arg_name = "img"
@@ -248,9 +443,12 @@ class CachedTransformerBlocks(torch.nn.Module):
                         hidden_states = block(encoder_hidden_states,
                                               hidden_states, *args, **kwargs)
                 if not self.return_hidden_states_only:
-                    hidden_states, encoder_hidden_states = hidden_states
-                    if not self.return_hidden_states_first:
-                        hidden_states, encoder_hidden_states = encoder_hidden_states, hidden_states
+                    # Handle both single tensor and tuple returns
+                    if isinstance(hidden_states, (tuple, list)) and len(hidden_states) == 2:
+                        hidden_states, encoder_hidden_states = hidden_states
+                        if not self.return_hidden_states_first:
+                            hidden_states, encoder_hidden_states = encoder_hidden_states, hidden_states
+                    # If it's a single tensor, keep encoder_hidden_states as is
             if self.single_transformer_blocks is not None:
                 hidden_states = torch.cat(
                     [hidden_states, encoder_hidden_states]
@@ -288,9 +486,12 @@ class CachedTransformerBlocks(torch.nn.Module):
                 hidden_states = first_transformer_block(
                     encoder_hidden_states, hidden_states, *args, **kwargs)
         if not self.return_hidden_states_only:
-            hidden_states, encoder_hidden_states = hidden_states
-            if not self.return_hidden_states_first:
-                hidden_states, encoder_hidden_states = encoder_hidden_states, hidden_states
+            # Handle both single tensor and tuple returns
+            if isinstance(hidden_states, (tuple, list)) and len(hidden_states) == 2:
+                hidden_states, encoder_hidden_states = hidden_states
+                if not self.return_hidden_states_first:
+                    hidden_states, encoder_hidden_states = encoder_hidden_states, hidden_states
+            # If it's a single tensor, keep encoder_hidden_states as is
         first_hidden_states_residual = hidden_states - original_hidden_states
         del original_hidden_states
 
@@ -360,9 +561,12 @@ class CachedTransformerBlocks(torch.nn.Module):
                     hidden_states = block(encoder_hidden_states, hidden_states,
                                           *args, **kwargs)
             if not self.return_hidden_states_only:
-                hidden_states, encoder_hidden_states = hidden_states
-                if not self.return_hidden_states_first:
-                    hidden_states, encoder_hidden_states = encoder_hidden_states, hidden_states
+                # Handle both single tensor and tuple returns
+                if isinstance(hidden_states, (tuple, list)) and len(hidden_states) == 2:
+                    hidden_states, encoder_hidden_states = hidden_states
+                    if not self.return_hidden_states_first:
+                        hidden_states, encoder_hidden_states = encoder_hidden_states, hidden_states
+                # If it's a single tensor, keep encoder_hidden_states as is
         if self.single_transformer_blocks is not None:
             hidden_states = torch.cat([hidden_states, encoder_hidden_states]
                                       if self.cat_hidden_states_first else

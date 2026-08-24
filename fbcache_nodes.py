@@ -210,15 +210,24 @@ class ApplyFBCacheOnModel:
 
             double_blocks_name = None
             single_blocks_name = None
+            
+            # Check for different transformer block naming conventions
             if hasattr(diffusion_model, "transformer_blocks"):
                 double_blocks_name = "transformer_blocks"
             elif hasattr(diffusion_model, "double_blocks"):
                 double_blocks_name = "double_blocks"
             elif hasattr(diffusion_model, "joint_blocks"):
                 double_blocks_name = "joint_blocks"
+            elif hasattr(diffusion_model, "blocks"):  # NextDiT/DiT style blocks
+                double_blocks_name = "blocks"
+            elif hasattr(diffusion_model, "layers"):  # Alternative naming
+                double_blocks_name = "layers"
+            elif hasattr(diffusion_model, "dit_blocks"):  # Another DiT variant
+                double_blocks_name = "dit_blocks"
             else:
                 raise ValueError(
-                    f"No double blocks found for {diffusion_model.__class__.__name__}"
+                    f"No supported blocks found for {diffusion_model.__class__.__name__}. "
+                    f"Available attributes: {[attr for attr in dir(diffusion_model) if not attr.startswith('_') and not callable(getattr(diffusion_model, attr))]}"
                 )
 
             if hasattr(diffusion_model, "single_blocks"):
@@ -252,8 +261,8 @@ class ApplyFBCacheOnModel:
                     validate_can_use_cache_function=validate_use_cache,
                     cat_hidden_states_first=diffusion_model.__class__.__name__
                     == "HunyuanVideo",
-                    return_hidden_states_only=diffusion_model.__class__.
-                    __name__ == "LTXVModel" or is_non_native_ltxv,
+                    return_hidden_states_only=(diffusion_model.__class__.
+                    __name__ in ["LTXVModel", "Lumina2", "NextDiT"] or is_non_native_ltxv),
                     clone_original_hidden_states=diffusion_model.__class__.
                     __name__ == "LTXVModel",
                     return_hidden_states_first=diffusion_model.__class__.
