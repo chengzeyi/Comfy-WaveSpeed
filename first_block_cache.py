@@ -718,6 +718,7 @@ def create_patch_flux_forward_orig(model,
         control=None,
         transformer_options={},
         attn_mask: Tensor = None,
+        **kwargs,
     ) -> Tensor:
         patches_replace = transformer_options.get("patches_replace", {})
         if img.ndim != 3 or txt.ndim != 3:
@@ -728,14 +729,21 @@ def create_patch_flux_forward_orig(model,
         img = self.img_in(img)
         vec = self.time_in(timestep_embedding(timesteps, 256).to(img.dtype))
         if self.params.guidance_embed:
-            if guidance is None:
-                raise ValueError(
-                    "Didn't get guidance strength for guidance distilled model."
-                )
-            vec = vec + self.guidance_in(
-                timestep_embedding(guidance, 256).to(img.dtype))
+            if guidance is not None:
+                vec = vec + self.guidance_in(
+                    timestep_embedding(guidance, 256).to(img.dtype))
 
-        vec = vec + self.vector_in(y[:, :self.params.vec_in_dim])
+        if self.vector_in is not None:
+            if y is None:
+                y = torch.zeros(
+                    (img.shape[0], self.params.vec_in_dim),
+                    device=img.device,
+                    dtype=img.dtype,
+                )
+            vec = vec + self.vector_in(y[:, :self.params.vec_in_dim])
+
+        if getattr(self, "txt_norm", None) is not None:
+            txt = self.txt_norm(txt)
         txt = self.txt_in(txt)
 
         ids = torch.cat((txt_ids, img_ids), dim=1)
